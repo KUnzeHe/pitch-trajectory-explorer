@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>球种位移与轨迹</title>
+<style>
+:root{--text-primary:#0b0b0b;--text-secondary:#52514e;--text-muted:#898781;--surface-1:#f5f4f0;--surface-2:#ffffff;--border-strong:rgba(11,11,11,.18);--border-stronger:rgba(11,11,11,.4);--plate:#f1efe8}
+@media (prefers-color-scheme:dark){:root{--text-primary:#f0efec;--text-secondary:#c3c2b7;--text-muted:#898781;--surface-1:#262624;--surface-2:#1a1a19;--border-strong:rgba(255,255,255,.18);--border-stronger:rgba(255,255,255,.4);--plate:#383835}}
+body{margin:0;padding:24px 16px;background:var(--surface-2);color:var(--text-primary);font-family:"PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+main{max-width:720px;margin:0 auto}
+button{font:inherit;color:inherit;background:transparent;border:0.5px solid var(--border-strong);border-radius:8px}
+.chip{font-size:12px;padding:4px 10px;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.chip.on{border-color:var(--border-stronger);background:var(--surface-1)}
+.sw{width:10px;height:10px;border-radius:2px;display:inline-block}
+.pn{font-size:13px;color:var(--text-secondary);margin:0 0 4px}
+.lb{font-size:13px;color:var(--text-secondary)}
+</style>
+</head>
+<body><main>
+<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px">
+  <span class="lb">投手</span>
+  <button id="hR" class="chip on">右投</button>
+  <button id="hL" class="chip">左投</button>
+  <span class="lb" style="margin-left:12px">视角</span>
+  <button id="vC" class="chip on">捕手视角</button>
+  <button id="vP" class="chip">投手视角</button>
+  <button id="vB" class="chip">打者视角</button>
+  <span style="flex:1"></span>
+  <button id="all" class="chip">显示全部</button>
+</div>
+<div id="pctl" style="display:none;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 10px">
+  <span class="lb">相机在出手点后方</span>
+  <input id="camD" type="range" min="2" max="60" step="1" value="10" style="flex:1;min-width:140px">
+  <span id="camDo" style="font-size:13px;min-width:44px">10 ft</span>
+  <button id="play" class="chip">慢放 ×8</button>
+</div>
+<div id="bctl" style="display:none;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 10px">
+  <span class="lb">打者</span>
+  <button id="bR" class="chip on">右打</button>
+  <button id="bL" class="chip">左打</button>
+  <span style="flex:1"></span>
+  <button id="play2" class="chip">慢放 ×8</button>
+</div>
+<div id="legend" style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px"></div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">
+  <div><p class="pn" id="t1"></p><svg id="radar" viewBox="0 0 320 320" width="100%"></svg></div>
+  <div><p class="pn" id="t2"></p><svg id="traj" viewBox="0 0 320 320" width="100%"></svg></div>
+</div>
+<div id="info" style="margin-top:10px;font-size:13px;color:var(--text-secondary);min-height:20px"></div>
+</main>
+<script>
+const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+const P=[
+['四缝线','FF',94.5,16,8,'#2a78d6','#3987e5'],
+['伸卡','SI',93.5,8,15,'#eb6834','#d95926'],
+['卡特','FC',90,9,-2.5,'#1baf7a','#199e70'],
+['滑球','SL',86,2,-4.5,'#eda100','#c98500'],
+['横扫','ST',83,1.5,-15,'#e87ba4','#d55181'],
+['曲球','CU',79.5,-10,-8,'#008300','#008300'],
+['变速球','CH',85.5,6,13.5,'#6250d6','#9085e9'],
+['指叉','FS',86.5,2.5,9.5,'#e34948','#e66767']
+].map(a=>({name:a[0],ab:a[1],v:a[2],ivb:a[3],hb:a[4],c:dark?a[6]:a[5]}));
+const grid=dark?'#2c2c2a':'#e1e0d9',axis=dark?'#383835':'#c3c2b7';
+const FL=54,BR=0.121,SLOW=8;
+let hand='R',view='C',bat='R',sel=null,camD=10,raf=null,scene=null;
+const TDEC=0.175,YCUT=4;
+function armDir(){const d=hand==='R'?-1:1;return view==='P'?-d:d}
+const VN=()=>({C:'捕手视角',P:'投手视角',B:'打者视角'})[view];
+const batZh=()=>bat==='R'?'右打':'左打';
+function sideLbl(isArm){const b=isArm?'手臂侧':'手套侧';if(view!=='B')return b;return b+'·'+(((hand===bat)===isArm)?'内角':'外角')}
+const NS='http://www.w3.org/2000/svg';
+function el(t,a,p){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);p.appendChild(e);return e}
+function txt(s,x,y,p,o={}){const e=el('text',{x,y,'font-size':o.fs||11,'text-anchor':o.a||'middle',style:'fill:'+(o.f||'var(--text-muted)')},p);e.textContent=s;return e}
+function grav(v){const t=FL/(v*1.4667);return 0.5*32.2*t*t*12}
+function alpha(p){return sel===null||sel===p.ab?1:0.12}
+
+function drawRadar(){
+  const s=document.getElementById('radar');s.innerHTML='';
+  const cx=160,cy=160,k=6.5,arm=armDir();
+  [5,10,15,20].forEach(r=>{el('circle',{cx,cy,r:r*k,fill:'none',stroke:grid,'stroke-width':1},s);txt(r,cx+4,cy-r*k+11,s,{a:'start'})});
+  el('line',{x1:20,y1:cy,x2:300,y2:cy,stroke:axis},s);el('line',{x1:cx,y1:20,x2:cx,y2:300,stroke:axis},s);
+  txt('少坠 (IVB+)',cx,14,s);txt('多坠 (IVB−)',cx,314,s);
+  txt(sideLbl(arm<0),8,cy+16,s,{a:'start'});txt(sideLbl(arm>0),312,cy+16,s,{a:'end'});
+  P.forEach(p=>{
+    const x=cx+arm*p.hb*k,y=cy-p.ivb*k,g=el('g',{opacity:alpha(p),style:'cursor:pointer'},s);
+    el('circle',{cx:x,cy:y,r:2.8*k,fill:p.c,'fill-opacity':0.15},g);
+    el('line',{x1:cx,y1:cy,x2:x,y2:y,stroke:p.c,'stroke-width':2,'stroke-linecap':'round'},g);
+    el('circle',{cx:x,cy:y,r:5,fill:p.c,stroke:'var(--surface-2)','stroke-width':2},g);
+    const L=Math.hypot(x-cx,y-cy)||1;
+    txt(p.ab,x+(x-cx)/L*14,y+(y-cy)/L*14+4,g,{f:'var(--text-primary)'});
+    g.addEventListener('click',()=>pick(p.ab));
+  });
+}
+
+function drawOrtho(s){
+  const k=42,X=x=>160+x*k,Z=z=>300-z*k,arm=armDir();
+  const R={x:arm*2,z:5.8},C={x:0,z:2.5};
+  el('line',{x1:0,y1:Z(0),x2:320,y2:Z(0),stroke:axis},s);
+  el('rect',{x:X(-0.83),y:Z(3.5),width:1.66*k,height:2*k,fill:'none',stroke:'var(--border-stronger)','stroke-dasharray':'4 3'},s);
+  txt('好球带',X(0),Z(1.5)+14,s);
+  txt('三垒侧',8,14,s,{a:'start'});txt('一垒侧',312,14,s,{a:'end'});
+  el('circle',{cx:X(R.x),cy:Z(R.z),r:4,fill:'var(--text-muted)'},s);
+  txt('出手点',X(R.x),Z(R.z)-10,s);
+  const path=fn=>{let d='';for(let i=0;i<=40;i++){const t=i/40,q=fn(t);d+=(i?'L':'M')+X(q.x).toFixed(1)+' '+Z(q.z).toFixed(1)}return d};
+  const G0=grav(90)/12;
+  el('path',{d:path(t=>({x:R.x+(C.x-R.x)*t,z:R.z+(C.z+G0-R.z)*t-G0*t*t})),fill:'none',stroke:'var(--text-muted)','stroke-width':1.5,'stroke-dasharray':'5 4'},s);
+  P.forEach(p=>{
+    const G=grav(p.v)/12,hx=arm*p.hb/12,iz=p.ivb/12,g=el('g',{opacity:alpha(p),style:'cursor:pointer'},s);
+    el('path',{d:path(t=>({x:R.x+(C.x-R.x)*t+hx*t*t,z:R.z+(C.z+G-R.z)*t+(iz-G)*t*t})),fill:'none',stroke:p.c,'stroke-width':2,'stroke-linecap':'round'},g);
+    const ex=X(C.x+hx),ez=Z(C.z+iz);
+    el('circle',{cx:ex,cy:ez,r:5,fill:p.c,stroke:'var(--surface-2)','stroke-width':2},g);
+    txt(p.ab,ex+(ex>=160?12:-12),ez+4,g,{f:'var(--text-primary)',a:ex>=160?'start':'end'});
+    g.addEventListener('click',()=>pick(p.ab));
+  });
+}
+
+function pos3(p,arm,s){
+  const v=p?p.v:90,ivb=p?p.ivb:0,hb=p?p.hb:0,G=grav(v)/12,hx=arm*hb/12,iz=ivb/12;
+  return{x:arm*2+(0-arm*2)*s+hx*s*s,y:FL*(1-s),z:5.8+(2.5+G-5.8)*s+(iz-G)*s*s};
+}
+function fit(pts,r,pad){
+  let u0=1e9,u1=-1e9,v0=1e9,v1=-1e9;
+  pts.forEach(q=>{u0=Math.min(u0,q.u);u1=Math.max(u1,q.u);v0=Math.min(v0,q.v);v1=Math.max(v1,q.v)});
+  const sc=Math.min((r.w-2*pad)/(u1-u0),(r.h-2*pad)/(v1-v0)),mu=(u0+u1)/2,mv=(v0+v1)/2,cx=r.x+r.w/2,cy=r.y+r.h/2;
+  return{sc,f:q=>[cx+(q.u-mu)*sc,cy-(q.v-mv)*sc],inv:(X,Y)=>({u:mu+(X-cx)/sc,v:mv-(Y-cy)/sc})};
+}
+function poly(pts,M){return pts.map(q=>M.f(q).map(n=>n.toFixed(1)).join(',')).join(' ')}
+
+function drawPersp(s){
+  const arm=armDir(),cam={x:arm*0.6,y:FL+camD,z:6.2};
+  const pj=q=>{const dp=cam.y-q.y;return{u:(q.x-cam.x)/dp,v:(q.z-cam.z)/dp,dp}};
+  const w=17/24,plate=[[-w,0],[w,0],[w,-w],[0,-2*w],[-w,-w]].map(a=>pj({x:a[0],y:a[1],z:0}));
+  const zone=[[-0.83,1.5],[0.83,1.5],[0.83,3.5],[-0.83,3.5]].map(a=>pj({x:a[0],y:0,z:a[1]}));
+  const N=80,paths=P.map(p=>{const a=[];for(let i=0;i<=N;i++)a.push(pj(pos3(p,arm,i/N)));return a});
+  const ref=[];for(let i=0;i<=N;i++)ref.push(pj(pos3(null,arm,i/N)));
+  const rel=paths[0][0],rr=BR/rel.dp;
+  const all=[].concat(...paths,plate,zone,[{u:rel.u+rr,v:rel.v+rr},{u:rel.u-rr,v:rel.v-rr}]);
+  const RM={x:8,y:186,w:304,h:130},RI={x:40,y:20,w:240,h:146};
+  const M=fit(all,RM,8);
+  const ends=[].concat(...paths.map(a=>a.slice(Math.round(N*0.82))));
+  const I=fit(zone.concat(ends),RI,20);
+  const a0=I.inv(RI.x,RI.y),a1=I.inv(RI.x+RI.w,RI.y+RI.h);
+
+  txt('全景（近大远小）',RM.x,RM.y-6,s,{a:'start',f:'var(--text-secondary)'});
+  el('polygon',{points:poly(plate,M),fill:'var(--plate)',stroke:axis},s);
+  el('polygon',{points:poly(zone,M),fill:'none',stroke:'var(--border-stronger)','stroke-dasharray':'3 2'},s);
+  const b0=M.f(a0),b1=M.f(a1);
+  const cpm=el('clipPath',{id:'cpM'},el('defs',{},s));el('rect',{x:RM.x,y:RM.y,width:RM.w,height:RM.h},cpm);
+  el('rect',{x:Math.min(b0[0],b1[0]),y:Math.min(b0[1],b1[1]),width:Math.abs(b1[0]-b0[0]),height:Math.abs(b1[1]-b0[1]),fill:'none',stroke:'var(--text-muted)','stroke-dasharray':'1 2','clip-path':'url(#cpM)'},s);
+  el('polyline',{points:poly(ref,M),fill:'none',stroke:'var(--text-muted)','stroke-width':1.2,'stroke-dasharray':'4 3'},s);
+  P.forEach((p,k)=>{
+    const g=el('g',{opacity:alpha(p),style:'cursor:pointer'},s),pts=paths[k];
+    for(let i=0;i<N;i++){const A=M.f(pts[i]),B=M.f(pts[i+1]);el('line',{x1:A[0],y1:A[1],x2:B[0],y2:B[1],stroke:p.c,'stroke-width':Math.max(0.8,Math.min(4,30/pts[i].dp)).toFixed(2),'stroke-linecap':'round'},g)}
+    const gh=sel===p.ab?[10,20,30,40,50,60,70]:[40,60];
+    gh.forEach(i=>{const C=M.f(pts[i]);el('circle',{cx:C[0],cy:C[1],r:Math.max(1.5,BR*M.sc/pts[i].dp),fill:p.c,'fill-opacity':0.3},g)});
+    const E=M.f(pts[N]);el('circle',{cx:E[0],cy:E[1],r:2.5,fill:p.c},g);
+    g.addEventListener('click',()=>pick(p.ab));
+  });
+  const RC=M.f(rel);
+  el('circle',{cx:RC[0],cy:RC[1],r:BR*M.sc/rel.dp,fill:'#888780','fill-opacity':0.9},s);
+  txt('出手点',RC[0],RC[1]-BR*M.sc/rel.dp-5,s);
+  const gM=el('g',{},s);
+
+  el('rect',{x:RI.x,y:RI.y,width:RI.w,height:RI.h,fill:'none',stroke:axis},s);
+  txt('本垒附近放大',RI.x,RI.y-6,s,{a:'start',f:'var(--text-secondary)'});
+  const defs=el('defs',{},s),cp=el('clipPath',{id:'cpI'},defs);el('rect',{x:RI.x,y:RI.y,width:RI.w,height:RI.h},cp);
+  const gI=el('g',{'clip-path':'url(#cpI)'},s);
+  el('polygon',{points:poly(plate,I),fill:'var(--plate)',stroke:axis},gI);
+  el('polygon',{points:poly(zone,I),fill:'none',stroke:'var(--border-stronger)','stroke-dasharray':'4 3'},gI);
+  el('polyline',{points:poly(ref,I),fill:'none',stroke:'var(--text-muted)','stroke-width':1.5,'stroke-dasharray':'5 4'},gI);
+  const zc=I.f(zone[0])[0]/2+I.f(zone[1])[0]/2;
+  P.forEach((p,k)=>{
+    const g=el('g',{opacity:alpha(p),style:'cursor:pointer'},gI),pts=paths[k];
+    el('polyline',{points:poly(pts,I),fill:'none',stroke:p.c,'stroke-width':2,'stroke-linecap':'round'},g);
+    const E=I.f(pts[N]);el('circle',{cx:E[0],cy:E[1],r:4.5,fill:p.c,stroke:'var(--surface-2)','stroke-width':1.5},g);
+    txt(p.ab,E[0]+(E[0]>=zc?9:-9),E[1]+4,g,{f:'var(--text-primary)',a:E[0]>=zc?'start':'end'});
+    g.addEventListener('click',()=>pick(p.ab));
+  });
+  txt('一垒侧',RI.x+4,RI.y+RI.h-6,s,{a:'start'});txt('三垒侧',RI.x+RI.w-4,RI.y+RI.h-6,s,{a:'end'});
+  const gIb=el('g',{'clip-path':'url(#cpI)'},s);
+  scene={arm,pj,M,I,gM,gIb};
+}
+
+function drawBatter(s){
+  const arm=armDir(),cam={x:bat==='R'?-2.4:2.4,y:-0.4,z:5.0};
+  const pj=q=>{const dp=q.y-cam.y;return{u:(q.x-cam.x)/dp,v:(q.z-cam.z)/dp,dp,y:q.y}};
+  const N=160,trace=p=>{const a=[];for(let i=0;i<=N;i++){const q=pos3(p,arm,i/N);if(q.y<YCUT)break;a.push(pj(q))}return a};
+  const paths=P.map(trace),ref=trace(null);
+  const decY={},dec=P.map(p=>{const T=FL/(p.v*1.4667),q=pos3(p,arm,1-TDEC/T);decY[p.ab]=q.y;return pj(q)});
+  const RM={x:8,y:192,w:304,h:124},RI={x:40,y:20,w:240,h:136};
+  const M=fit([].concat(...paths),RM,10);
+  const tun=P.map((p,k)=>paths[k].filter(q=>q.y>=decY[p.ab]));
+  const I=fit([].concat(...tun,dec),RI,24);
+  const yy=24,ss=1-yy/FL,sep=sx=>{let m=0;const Q=P.map(p=>pos3(p,arm,sx));Q.forEach(a=>Q.forEach(b=>{m=Math.max(m,Math.hypot(a.x-b.x,a.z-b.z))}));return m*12};
+  txt('全景（由远及近，画到本垒前 '+YCUT+' ft）',RM.x,RM.y-6,s,{a:'start',f:'var(--text-secondary)'});
+  el('polyline',{points:poly(ref,M),fill:'none',stroke:'var(--text-muted)','stroke-width':1.2,'stroke-dasharray':'4 3'},s);
+  P.forEach((p,k)=>{
+    const g=el('g',{opacity:alpha(p),style:'cursor:pointer'},s),pts=paths[k];
+    for(let i=0;i<pts.length-1;i++){const A=M.f(pts[i]),B=M.f(pts[i+1]);el('line',{x1:A[0],y1:A[1],x2:B[0],y2:B[1],stroke:p.c,'stroke-opacity':pts[i].y>=decY[p.ab]?1:0.5,'stroke-dasharray':pts[i].y>=decY[p.ab]?'none':'3 2','stroke-width':Math.max(0.8,Math.min(5,22/pts[i].dp)).toFixed(2),'stroke-linecap':'round'},g)}
+    const D=M.f(dec[k]);el('circle',{cx:D[0],cy:D[1],r:Math.max(3.5,BR*M.sc/dec[k].dp*1.6),fill:'none',stroke:p.c,'stroke-width':1.5},g);
+    const E=M.f(pts[pts.length-1]);txt(p.ab,E[0],E[1]+(E[1]>RM.y+RM.h/2?-8:14),g,{f:'var(--text-primary)'});
+    g.addEventListener('click',()=>pick(p.ab));
+  });
+  const RC=M.f(paths[0][0]);el('circle',{cx:RC[0],cy:RC[1],r:2.5,fill:'#888780'},s);txt('出手点',RC[0],RC[1]-6,s);
+  const gM=el('g',{},s);
+  el('rect',{x:RI.x,y:RI.y,width:RI.w,height:RI.h,fill:'none',stroke:axis},s);
+  txt('隧道效应：出手 → 决策点（放大）',RI.x,RI.y-6,s,{a:'start',f:'var(--text-secondary)'});
+  const defs=el('defs',{},s),cp=el('clipPath',{id:'cpI'},defs);el('rect',{x:RI.x,y:RI.y,width:RI.w,height:RI.h},cp);
+  const gI=el('g',{'clip-path':'url(#cpI)'},s);
+  P.forEach((p,k)=>{
+    const g=el('g',{opacity:alpha(p),style:'cursor:pointer'},gI);
+    el('polyline',{points:poly(tun[k],I),fill:'none',stroke:p.c,'stroke-width':2,'stroke-linecap':'round'},g);
+    const D=I.f(dec[k]);el('circle',{cx:D[0],cy:D[1],r:4,fill:p.c,stroke:'var(--surface-2)','stroke-width':1.5},g);
+    txt(p.ab,D[0]+8,D[1]+4,g,{f:'var(--text-primary)',a:'start'});
+    g.addEventListener('click',()=>pick(p.ab));
+  });
+  txt('离本垒 '+yy+' ft 时各球最多相差约 '+Math.round(sep(ss))+' in，到本垒时约 '+Math.round(sep(1))+' in',RI.x+RI.w/2,RI.y+RI.h+15,s,{fs:11});
+  const gIb=el('g',{'clip-path':'url(#cpI)'},s);
+  scene={arm,pj,M,I,gM,gIb,ycut:YCUT,decY};
+}
+
+function drawTraj(){
+  const s=document.getElementById('traj');s.innerHTML='';scene=null;
+  view==='C'?drawOrtho(s):view==='P'?drawPersp(s):drawBatter(s);
+}
+
+function play(){
+  if(raf)cancelAnimationFrame(raf);
+  if(!scene)return;
+  const list=P.filter(p=>sel===null||sel===p.ab),t0=performance.now();
+  const step=now=>{
+    if(!scene){raf=null;return}
+    const tr=(now-t0)/1000/SLOW;let done=true;
+    scene.gM.innerHTML='';scene.gIb.innerHTML='';
+    list.forEach(p=>{
+      const T=FL/(p.v*1.4667),sp=Math.min(tr/T,1);if(sp<1)done=false;
+      const q3=pos3(p,scene.arm,sp);if(scene.ycut&&q3.y<scene.ycut)return;
+      const q=scene.pj(q3);
+      const A=scene.M.f(q);el('circle',{cx:A[0],cy:A[1],r:Math.max(2,Math.min(30,BR*scene.M.sc/q.dp)),fill:p.c,stroke:'var(--surface-2)','stroke-width':1},scene.gM);
+      if(scene.decY&&q3.y<scene.decY[p.ab])return;
+      const B=scene.I.f(q);el('circle',{cx:B[0],cy:B[1],r:Math.max(3,Math.min(30,BR*scene.I.sc/q.dp)),fill:p.c,stroke:'var(--surface-2)','stroke-width':1},scene.gIb);
+    });
+    raf=done&&tr>0.6?null:requestAnimationFrame(step);
+  };
+  raf=requestAnimationFrame(step);
+}
+
+function legend(){
+  const L=document.getElementById('legend');L.innerHTML='';
+  P.forEach(p=>{const b=document.createElement('button');b.className='chip'+(sel===p.ab?' on':'');b.innerHTML='<span class="sw" style="background:'+p.c+'"></span>'+p.name+' '+p.ab;b.onclick=()=>pick(p.ab);L.appendChild(b)});
+}
+function info(){
+  const I=document.getElementById('info');
+  if(sel===null){I.textContent='点击球种或图中的线条可单独高亮；切换左右投或视角会镜像两张图。'+(view==='P'?'投手视角为第一人称透视，可拖动相机距离或点“慢放”。':view==='B'?'打者视角为打者眼睛位置的第一人称透视：圆圈是挥棒决策点（到达本垒前约 0.175 s），之后的线变淡；轨迹画到本垒前 '+YCUT+' ft，最后约 0.03 s 球从视野侧面掠过，现实中打者也看不清。':'');return}
+  const p=P.find(q=>q.ab===sel),G=grav(p.v);
+  I.textContent=p.name+' '+p.ab+'：约 '+p.v+' mph，飞行约 '+(FL/(p.v*1.4667)).toFixed(2)+' s，IVB '+(p.ivb>0?'+':'')+p.ivb+' in，HB '+(p.hb>0?'手臂侧 ':'手套侧 ')+Math.abs(p.hb)+' in，含重力总 VB 约 '+Math.round(p.ivb-G)+' in'+(view==='B'?'；决策点约在离本垒 '+Math.round(p.v*1.4667*TDEC)+' ft 处':'');
+}
+function pick(ab){sel=sel===ab?null:ab;render()}
+function render(){
+  if(raf){cancelAnimationFrame(raf);raf=null}
+  document.getElementById('t1').textContent='位移雷达（'+VN()+(view==='B'?'·'+batZh():'')+'，单位 in，IVB 不含重力）';
+  document.getElementById('t2').textContent={C:'捕手视角轨迹（正投影，虚线为无旋转参考球）',P:'投手视角轨迹（第一人称透视，虚线为无旋转参考球）',B:'打者视角轨迹（'+batZh()+'，第一人称透视，圆圈为决策点）'}[view];
+  document.getElementById('pctl').style.display=view==='P'?'flex':'none';
+  document.getElementById('bctl').style.display=view==='B'?'flex':'none';
+  ['hR','hL','vC','vP','vB','bR','bL'].forEach(id=>document.getElementById(id).classList.toggle('on',{hR:hand==='R',hL:hand==='L',vC:view==='C',vP:view==='P',vB:view==='B',bR:bat==='R',bL:bat==='L'}[id]));
+  drawRadar();drawTraj();legend();info();
+}
+document.getElementById('hR').onclick=()=>{hand='R';render()};
+document.getElementById('hL').onclick=()=>{hand='L';render()};
+document.getElementById('vC').onclick=()=>{view='C';render()};
+document.getElementById('vP').onclick=()=>{view='P';render()};
+document.getElementById('vB').onclick=()=>{view='B';render()};
+document.getElementById('bR').onclick=()=>{bat='R';render()};
+document.getElementById('bL').onclick=()=>{bat='L';render()};
+document.getElementById('play2').onclick=play;
+document.getElementById('all').onclick=()=>{sel=null;render()};
+document.getElementById('camD').oninput=e=>{camD=+e.target.value;document.getElementById('camDo').textContent=camD+' ft';render()};
+document.getElementById('play').onclick=play;
+render();
+</script>
+</body>
+</html>

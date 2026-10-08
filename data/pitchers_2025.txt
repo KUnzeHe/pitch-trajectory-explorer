@@ -1,0 +1,17 @@
+# 2025 常规赛投手名单：每行一个 MLBAM ID，# 之后为注释（球队 / 姓名）。
+# 增删投手后运行 scripts/download_statcast.sh 2025 再 python scripts/build.py
+519242  # ATL Chris Sale
+676979  # BOS Garrett Crochet
+661403  # CLE Emmanuel Clase
+669373  # DET Tarik Skubal
+664285  # HOU Framber Valdez
+477132  # LAD Clayton Kershaw
+660271  # LAD Shohei Ohtani
+808967  # LAD Yoshinobu Yamamoto
+673540  # NYM Kodai Senga
+642207  # NYY Devin Williams
+554430  # PHI Zack Wheeler
+694973  # PIT Paul Skenes
+434378  # SF Justin Verlander
+657277  # SF Logan Webb
+594798  # TEX Jacob deGrom

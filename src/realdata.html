@@ -1,0 +1,170 @@
+<style>
+.h1{font-size:20px;font-weight:500;margin:0 0 12px}
+.tabs{display:flex;gap:4px;border-bottom:0.5px solid var(--border-strong);margin:0 0 16px}
+.tab{border:0;border-radius:0;padding:8px 12px;font-size:14px;color:var(--text-secondary);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-0.5px}
+.tab.on{color:var(--text-primary);border-bottom-color:var(--text-primary)}
+.tm{display:inline-block;font-size:10.5px;line-height:1;padding:3px 5px;border-radius:4px;font-weight:500;letter-spacing:.02em;vertical-align:1px}
+.pcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:5px;margin:0 0 12px}
+.pcard{text-align:left;padding:6px 8px;cursor:pointer;display:flex;gap:6px;align-items:center;min-width:0}
+.pcard.on{border-color:var(--border-stronger);background:var(--surface-1)}
+.pcard .nm{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.pcard .hd{font-size:11px;color:var(--text-muted)}
+.prof{background:var(--surface-1);border-radius:12px;padding:12px 14px;margin:0 0 12px;font-size:13px;line-height:1.7}
+.prof .big{font-size:16px;font-weight:500}
+.prof .sub2{color:var(--text-secondary)}
+#r-wrap{position:relative;width:100%;max-width:620px;margin:6px auto 0}
+#r-cv{display:block;width:100%}
+#r-tip{position:absolute;pointer-events:none;background:var(--surface-2);border:0.5px solid var(--border-strong);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.6;display:none;white-space:nowrap;z-index:2}
+.rt{width:100%;border-collapse:collapse;font-size:13px;margin-top:14px;font-variant-numeric:tabular-nums}
+.rt th,.rt td{padding:6px 8px;border-bottom:0.5px solid var(--border-strong);text-align:right}
+.rt th{font-weight:500;color:var(--text-secondary)}
+.rt th:first-child,.rt td:first-child{text-align:left}
+.twrap{overflow-x:auto}
+.note{font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:12px}
+.n{color:var(--text-muted);font-variant-numeric:tabular-nums}
+.chip.off{opacity:.45}
+.rrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px}
+select{font:inherit;font-size:13px;color:inherit;background:transparent;border:0.5px solid var(--border-strong);border-radius:8px;height:30px;padding:0 8px}
+</style>
+<!--BODY-->
+<div class="rrow">
+  <span class="lb">赛季</span><span id="r-seasons" style="display:flex;gap:6px"></span>
+  <span class="lb" style="margin-left:12px">球队</span><select id="r-team"></select>
+  <span id="r-cnt" class="lb"></span>
+</div>
+<div class="pcards" id="r-cards"></div>
+<div id="r-prof"></div>
+<div class="rrow">
+  <span class="lb">视角</span>
+  <button class="chip on" data-rv="C">捕手视角</button>
+  <button class="chip" data-rv="P">投手视角</button>
+  <button class="chip" data-rv="B">打者视角</button>
+  <span id="r-bat" style="display:none;gap:6px;margin-left:6px"><button class="chip on" data-rb="R">右打</button><button class="chip" data-rb="L">左打</button></span>
+  <span style="flex:1"></span>
+  <button class="chip" id="r-on">全选球种</button>
+  <button class="chip" id="r-off">清空</button>
+</div>
+<div id="r-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px"></div>
+<div id="r-wrap"><canvas id="r-cv" role="img" aria-label="MLB 投手各球种 IVB 与 HB 的极坐标散点图"></canvas><div id="r-tip"></div></div>
+<div class="twrap"><table class="rt" id="r-tbl"></table></div>
+<p class="note" id="r-note"></p>
+<!--/BODY-->
+<script>
+const D=/*__DATA__*/null;
+const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+const T=D.types.map(t=>({...t,col:dark?t.cd:t.c}));
+const grid=dark?'#2c2c2a':'#e1e0d9',axis=dark?'#383835':'#c3c2b7',muted='#898781',ink=dark?'#f0efec':'#0b0b0b',bg=dark?'#1a1a19':'#ffffff';
+const RMAX=25,$=id=>document.getElementById(id);
+let si=0,team='',who=-1,view='C',bat='R',off=new Set(),pts=[];
+let S,PS,rows;
+function loadSeason(){
+  S=D.seasons[si];PS=S.pitchers;rows=S.rows.slice();
+  let seed=11;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
+  for(let i=rows.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[rows[i],rows[j]]=[rows[j],rows[i]]}
+  const ts=[...new Set(PS.flatMap(p=>p.teams))].sort();
+  $('r-team').innerHTML=`<option value="">全部 ${ts.length} 队</option>`+ts.map(t=>`<option value="${t}">${t} ${D.teams[t]?D.teams[t].zh:''}</option>`).join('');
+  $('r-team').value=team&&ts.includes(team)?team:'';team=$('r-team').value;
+}
+const hexA=(h,a)=>{const n=parseInt(h.slice(1),16);return`rgba(${n>>16},${n>>8&255},${n&255},${a})`};
+const badge=t=>{const m=D.teams[t]||{bg:'#5f5e5a',fg:'#fff',zh:t};return`<span class="tm" style="background:${m.bg};color:${m.fg}">${t}</span>`};
+const teamLine=p=>p.teams.map(t=>badge(t)+' '+(D.teams[t]?D.teams[t].zh:t)).join(' → ');
+const short=n=>/^[\u4e00-\u9fff]/.test(n)?n.split(' ')[0]:n;
+const inGroup=i=>!team||PS[i].teams.includes(team);
+const group=()=>PS.map((p,i)=>i).filter(inGroup);
+const handOf=()=>who<0?'R':PS[who].hand;
+const armDir=()=>{const d=handOf()==='L'?1:-1;return view==='P'?-d:d};
+function sideLbl(isArm){const b=isArm?'手臂侧':'手套侧';if(view!=='B')return b;return b+'·'+(((handOf()===bat)===isArm)?'内角':'外角')}
+function median(a){if(!a.length)return NaN;const s=a.slice().sort((x,y)=>x-y),m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2}
+function mixNow(){
+  if(who>=0)return PS[who].mix;
+  if(!team)return S.all;
+  const g=group(),cnt={},np={};let tot=0;
+  g.forEach(i=>PS[i].mix.forEach(m=>{cnt[m.t]=(cnt[m.t]||0)+m.n;np[m.t]=(np[m.t]||0)+1;tot+=m.n}));
+  const by={};rows.forEach(r=>{if(inGroup(r[0]))(by[r[1]]=by[r[1]]||[]).push(r)});
+  return Object.keys(cnt).map(Number).sort((a,b)=>a-b).map(t=>{const a=by[t]||[],sp=a.map(r=>r[5]).filter(v=>v>0);
+    return{t,n:cnt[t],np:np[t],u:cnt[t]/tot*100,v:median(a.map(r=>r[4])),s:sp.length?Math.round(median(sp)):-1,ivb:median(a.map(r=>r[3])),hb:median(a.map(r=>r[2]))}});
+}
+function seasons(){
+  $('r-seasons').innerHTML=D.seasons.map((s,i)=>`<button class="chip${i===si?' on':''}" data-s="${i}">${s.season}</button>`).join('');
+  $('r-seasons').querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{if(+b.dataset.s===si)return;si=+b.dataset.s;who=-1;off=new Set();loadSeason();render()});
+}
+function cards(){
+  const g=group(),C=$('r-cards');
+  $('r-cnt').textContent=`${g.length} 名投手`;
+  let h=`<button class="chip pcard${who<0?' on':''}" data-p="-1"><span class="nm">${team?team+' 全部':'全部投手'}（${g.length}）</span></button>`;
+  g.forEach(i=>{const p=PS[i];h+=`<button class="chip pcard${who===i?' on':''}" data-p="${i}" title="${p.name}">${p.teams.map(badge).join('')}<span class="nm">${short(p.name)}</span><span class="hd">${p.hand==='R'?'右':'左'}·${p.role==='先发'?'SP':'RP'}</span></button>`});
+  C.innerHTML=h;C.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{who=+b.dataset.p;off=new Set();render()});
+}
+function prof(){
+  const P=$('r-prof');
+  if(who<0){const g=group(),n=g.reduce((a,i)=>a+PS[i].n,0);
+    P.innerHTML=`<div class="prof"><span class="big">${team?teamLine({teams:[team]}):'全部投手'} · ${S.season} 常规赛</span><br><span class="sub2">${g.length} 名投手，合计 ${n.toLocaleString()} 球；左投已镜像为右投方向。散点为每人随机抽样，${team?'表格中位数来自抽样':'表格与大圆点用全季数据'}。点卡片或图中的点查看单个投手。</span></div>`;return}
+  const p=PS[who];
+  P.innerHTML=`<div class="prof"><span class="big">${p.name}</span>　${teamLine(p)}<br><span class="sub2">${p.hand==='R'?'右投':'左投'} · ${p.role} · ${S.season} 常规赛 ${p.games} 场（先发 ${p.starts}）· ${p.n.toLocaleString()} 球</span><br>${p.note}</div>`;
+}
+function chips(){
+  const C=$('r-chips');C.innerHTML='';
+  mixNow().slice().sort((a,b)=>a.t-b.t).forEach(m=>{const t=T[m.t],b=document.createElement('button');
+    b.className='chip'+(off.has(m.t)?' off':'');b.innerHTML=`<span class="sw" style="background:${t.col}"></span>${t.zh} ${t.code} <span class="n">${m.u.toFixed(1)}%</span>`;
+    b.onclick=()=>{off.has(m.t)?off.delete(m.t):off.add(m.t);draw();chips();table()};C.appendChild(b)});
+}
+function table(){
+  const grp=who<0,f=x=>isNaN(x)?'–':x.toFixed(1);
+  let h=`<tr><th>球种</th>${grp?'<th>投手数</th>':''}<th>球数</th><th>使用率</th><th>球速 mph</th><th>转速 rpm</th><th>IVB in</th><th>HB in（手臂侧+）</th></tr>`;
+  mixNow().forEach(m=>{const t=T[m.t];h+=`<tr style="opacity:${off.has(m.t)?0.4:1}"><td><span class="sw" style="background:${t.col};margin-right:6px"></span>${t.zh} ${t.code}</td>${grp?`<td>${m.np}</td>`:''}<td>${m.n}</td><td>${m.u.toFixed(1)}%</td><td>${f(m.v)}</td><td>${m.s>0?m.s:'–'}</td><td>${m.ivb>0?'+':''}${f(m.ivb)}</td><td>${f(m.hb)}</td></tr>`});
+  $('r-tbl').innerHTML=h;
+}
+function draw(){
+  const cv=$('r-cv'),W=cv.clientWidth;if(!W)return;
+  const ctx=cv.getContext('2d'),dpr=window.devicePixelRatio||1;cv.width=W*dpr;cv.height=W*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,W);
+  const c=W/2,k=(W/2-34)/RMAX,arm=armDir(),F='"PingFang SC","Noto Sans CJK SC",sans-serif';
+  ctx.lineWidth=1;ctx.font='11px '+F;
+  for(let a=0;a<360;a+=30){const t=a*Math.PI/180;ctx.strokeStyle=grid;ctx.beginPath();ctx.moveTo(c,c);ctx.lineTo(c+Math.cos(t)*RMAX*k,c-Math.sin(t)*RMAX*k);ctx.stroke()}
+  for(let r=5;r<=RMAX;r+=5){ctx.strokeStyle=grid;ctx.beginPath();ctx.arc(c,c,r*k,0,2*Math.PI);ctx.stroke();ctx.fillStyle=muted;ctx.textAlign='left';ctx.fillText(r+' in',c+3,c-r*k+12)}
+  ctx.strokeStyle=axis;ctx.beginPath();ctx.moveTo(c-RMAX*k,c);ctx.lineTo(c+RMAX*k,c);ctx.moveTo(c,c-RMAX*k);ctx.lineTo(c,c+RMAX*k);ctx.stroke();
+  ctx.fillStyle=muted;ctx.textAlign='center';ctx.fillText('少坠（IVB+）',c,14);ctx.fillText('多坠（IVB−）',c,W-6);
+  ctx.textAlign='left';ctx.fillText(sideLbl(arm<0),4,c+16);ctx.textAlign='right';ctx.fillText(sideLbl(arm>0),W-4,c+16);
+  pts=[];const focus=who>=0;
+  if(focus){ctx.fillStyle=dark?'rgba(255,255,255,0.07)':'rgba(0,0,0,0.07)';
+    for(const r of rows){if(r[0]===who||!inGroup(r[0]))continue;const sg=PS[r[0]].hand===PS[who].hand?1:-1;ctx.fillRect(c+arm*sg*r[2]*k-1,c-r[3]*k-1,2,2)}}
+  const rad=focus?2.8:1.8,al=focus?0.6:0.3;
+  for(const r of rows){
+    if(focus?r[0]!==who:!inGroup(r[0]))continue;if(off.has(r[1]))continue;
+    const x=c+arm*r[2]*k,y=c-r[3]*k;ctx.fillStyle=hexA(T[r[1]].col,al);ctx.beginPath();ctx.arc(x,y,rad,0,2*Math.PI);ctx.fill();pts.push([x,y,r]);
+  }
+  ctx.font='12px '+F;
+  mixNow().forEach(m=>{if(off.has(m.t)||isNaN(m.hb))return;
+    const x=c+arm*m.hb*k,y=c-m.ivb*k,t=T[m.t];
+    ctx.fillStyle=t.col;ctx.strokeStyle=bg;ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(x,y,6.5,0,2*Math.PI);ctx.fill();ctx.stroke();
+    const L=Math.hypot(x-c,y-c)||1,lx=x+(x-c)/L*17,ly=y+(y-c)/L*17+4;
+    ctx.textAlign='center';ctx.lineWidth=3;ctx.strokeStyle=bg;ctx.strokeText(t.code,lx,ly);ctx.fillStyle=ink;ctx.fillText(t.code,lx,ly)});
+}
+function render(){
+  document.querySelectorAll('[data-rv]').forEach(b=>b.classList.toggle('on',b.dataset.rv===view));
+  document.querySelectorAll('[data-rb]').forEach(b=>b.classList.toggle('on',b.dataset.rb===bat));
+  $('r-bat').style.display=view==='B'?'flex':'none';
+  seasons();cards();prof();chips();table();draw();$('r-tip').style.display='none';
+}
+const cv=$('r-cv'),tip=$('r-tip');
+function nearest(e){const rc=cv.getBoundingClientRect(),mx=e.clientX-rc.left,my=e.clientY-rc.top;let best=null,bd=49;for(const p of pts){const d=(p[0]-mx)**2+(p[1]-my)**2;if(d<bd){bd=d;best=p}}return[best,rc,mx,my]}
+cv.addEventListener('mousemove',e=>{
+  const[best,rc,mx,my]=nearest(e);
+  if(!best){tip.style.display='none';cv.style.cursor='default';return}
+  const r=best[2],t=T[r[1]],p=PS[r[0]];cv.style.cursor=who<0?'pointer':'default';
+  tip.innerHTML=`${p.teams.map(badge).join(' ')} <span style="font-weight:500">${p.name}</span>（${p.hand==='R'?'右投':'左投'}）<br><span class="sw" style="background:${t.col};margin-right:4px"></span>${t.zh} ${t.code} · ${S.season}-${r[6]}<br>${r[4]} mph · ${r[5]>0?r[5]+' rpm':'转速缺失'}<br>IVB ${r[3]>0?'+':''}${r[3]} in · HB ${r[2]>=0?'手臂侧 ':'手套侧 '}${Math.abs(r[2])} in`;
+  tip.style.display='block';const tw=tip.offsetWidth,th=tip.offsetHeight;
+  tip.style.left=Math.min(rc.width-tw,Math.max(0,mx+12))+'px';tip.style.top=Math.max(0,my-th-10)+'px';
+});
+cv.addEventListener('mouseleave',()=>tip.style.display='none');
+cv.addEventListener('click',e=>{if(who>=0)return;const[best]=nearest(e);if(best){who=best[2][0];off=new Set();render()}});
+$('r-team').addEventListener('change',e=>{team=e.target.value;who=-1;off=new Set();render()});
+document.querySelectorAll('[data-rv]').forEach(b=>b.onclick=()=>{view=b.dataset.rv;render()});
+document.querySelectorAll('[data-rb]').forEach(b=>b.onclick=()=>{bat=b.dataset.rb;render()});
+$('r-on').onclick=()=>{off=new Set();render()};
+$('r-off').onclick=()=>{off=new Set(mixNow().map(m=>m.t));render()};
+window.addEventListener('resize',draw);
+$('r-note').innerHTML='数据：Baseball Savant（Statcast）常规赛逐球数据。IVB 为 pfx_z（已扣除重力），HB 由 pfx_x 换算为手臂侧为正；多人合并时左投被镜像到右投方向。打者视角与捕手视角朝向相同，两侧标注内角/外角（按所选打者的左右打）。球种标签沿用 Statcast 自动分类；单个投手中占比低于 2% 且不足 30 球的零星球种视为误分类已剔除。“主要球路”等看点由数据自动生成。球队徽章为缩写加队色，不含官方队标；赛季中转队的投手按出场先后显示多支球队。';
+loadSeason();render();
+return{draw,data:D};
+</script>

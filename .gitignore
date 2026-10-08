@@ -1,0 +1,7 @@
+# 原始 Statcast 数据（用 scripts/download_statcast.sh 重新下载）
+data/raw/
+*.csv
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
