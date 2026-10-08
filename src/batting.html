@@ -1,7 +1,7 @@
 <style>
 .brow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px}
-#b-wrap{position:relative;width:100%;margin:4px 0 0;border-radius:12px;overflow:hidden;border:0.5px solid var(--border-strong);user-select:none}
-#b-cv{display:block;width:100%;cursor:crosshair}
+.bwrap{position:relative;width:100%;margin:4px 0 0;border-radius:12px;overflow:hidden;border:0.5px solid var(--border-strong);user-select:none}
+.bcv{display:block;width:100%;cursor:crosshair}
 .tl{position:relative;margin:10px 0 2px}
 .tl input[type=range]{width:100%;margin:0}
 .ticks{position:relative;height:30px;font-size:11px;color:var(--text-muted)}
@@ -22,9 +22,9 @@
   <span class="lb">身份</span>
   <button class="chip on" data-br="bat">打者</button>
   <button class="chip" data-br="catch">捕手</button>
-  <span class="lb" style="margin-left:12px">模式</span>
+  <span id="b-moderow" style="display:inline-flex;gap:8px;align-items:center"><span class="lb" style="margin-left:12px">模式</span>
   <button class="chip on" data-bm="play">实战</button>
-  <button class="chip" data-bm="obs">观察</button>
+  <button class="chip" data-bm="obs">观察</button></span>
   <span class="lb" style="margin-left:12px">赛季</span><span id="b-seasons" style="display:flex;gap:6px"></span>
   <span class="lb" style="margin-left:12px">打者</span>
   <button class="chip on" data-bb="R">右打</button>
@@ -37,6 +37,8 @@
 <div class="brow" id="b-obsrow" style="display:none">
   <span class="lb">球种</span><span id="b-types" style="display:flex;flex-wrap:wrap;gap:6px"></span>
   <span class="lb" style="margin-left:6px">叠加对比</span><select id="b-cmp"></select>
+  <label class="lb"><input type="checkbox" id="b-ghost" checked> 四缝线基准</label>
+  <label class="lb"><input type="checkbox" id="b-zoom" checked> 放大镜</label>
 </div>
 <div class="opt">
   <label class="lb"><input type="checkbox" id="b-fp" checked> 第一人称遮挡</label>
@@ -49,7 +51,7 @@
   <span class="lb">视野 <input type="range" id="b-fov" min="20" max="75" step="1" value="30" style="width:80px;vertical-align:middle"> <span id="b-fovo">30°</span></span>
   <span id="b-speedrow" class="lb">速度 <button class="chip on" data-bs="1">1×</button> <button class="chip" data-bs="0.5">0.5×</button></span>
 </div>
-<div id="b-wrap"><canvas id="b-cv" role="img" aria-label="打者或捕手第一人称视角下的投球与打席"></canvas></div>
+<div id="b-wrap" class="bwrap"><canvas id="b-cv" class="bcv" role="img" aria-label="打者或捕手第一人称视角下的投球与打席"></canvas></div>
 <div id="b-obsctl" style="display:none">
   <div class="tl"><input id="b-t" type="range" min="0" max="500" step="1" value="0"><div class="ticks" id="b-ticks"></div></div>
   <div class="brow" style="margin-top:2px">
@@ -68,6 +70,7 @@
 <p class="note" id="b-note"></p>
 <!--/BODY-->
 <script>
+const ROOT=document.getElementById(/*__SEC__*/'tab-bat'),FIXED=/*__MODE__*/null;
 const $=id=>document.getElementById(id);
 const dark=matchMedia('(prefers-color-scheme: dark)').matches;
 const T=D.types.map(t=>({...t,col:dark?t.cd:t.c}));
@@ -109,7 +112,7 @@ function source(){
     const samp=[];s.pitchers.forEach(p=>{if(p.hand==='R')p.bat.samp.forEach(r=>samp.push([r[0],...(L?mir(r.slice(1)):r.slice(1))]))});
     return{name:(L?'左投':'右投')+'联盟典型',hand:L?'L':'R',teams:[],types:ty,samp,info:`${s.season} 赛季 ${s.typical.np} 名右投的各球种中位数${L?'（镜像为左投）':''}`}}
   const p=s.pitchers[+src.slice(2)];
-  return{name:p.name,hand:p.hand,teams:p.teams,types:p.bat.types,samp:p.bat.samp,info:`${p.hand==='R'?'右投':'左投'} · ${p.role} · ${p.n.toLocaleString()} 球`};
+  return{name:p.name,hand:p.hand,teams:p.teams,types:p.bat.types,samp:p.bat.samp,info:`${p.hand==='R'?'右投':'左投'} · ${p.role} · ${p.n.toLocaleString()} 球`+(p.style?' · '+p.style.tags.join(' · '):'')};
 }
 function mk(t,P){
   const[x0,z0,vx,vy,vz,ax,ay,az,ry]=P;
@@ -145,10 +148,11 @@ function gaze(p,pos){
   return def;
 }
 const trackStop=p=>{let lo=0,hi=p.T;for(let i=0;i<20;i++){const m=(lo+hi)/2;p.at(m)[1]>6?lo=m:hi=m}return lo};
-function setCam(target,shift){const E=add(eyeBase(),shift||[0,0,0]),f=nrm(sub(target,E)),r=nrm(cross(f,[0,0,1])),u=cross(r,f);cam={E,f,r,u,F:(H/2)/Math.tan(VIEW[role].fov/2*Math.PI/180)}}
+function setCam(target,shift,vp){const E=vp&&vp.E||add(eyeBase(),shift||[0,0,0]),f=nrm(sub(target,E)),r=nrm(cross(f,[0,0,1])),u=cross(r,f);
+  cam={E,f,r,u,cx:vp?vp.cx:W/2,cy:vp?vp.cy:H/2,F:vp?vp.F:(H/2)/Math.tan(VIEW[role].fov/2*Math.PI/180)}}
 const toC=p=>{const d=sub(p,cam.E);return[dot(d,cam.r),dot(d,cam.u),dot(d,cam.f)]};
-const pr=c=>[W/2+cam.F*c[0]/c[2],H/2-cam.F*c[1]/c[2]];
-function unproject(sx,sy,planeY){const dx=(sx-W/2)/cam.F,dy=-(sy-H/2)/cam.F;const dir=add(add(cam.f,mul(cam.r,dx)),mul(cam.u,dy));const t=(planeY-cam.E[1])/dir[1];return add(cam.E,mul(dir,t))}
+const pr=c=>[cam.cx+cam.F*c[0]/c[2],cam.cy-cam.F*c[1]/c[2]];
+function unproject(sx,sy,planeY){const dx=(sx-cam.cx)/cam.F,dy=-(sy-cam.cy)/cam.F;const dir=add(add(cam.f,mul(cam.r,dx)),mul(cam.u,dy));const t=(planeY-cam.E[1])/dir[1];return add(cam.E,mul(dir,t))}
 function clip(cs){const o=[];for(let i=0;i<cs.length;i++){const a=cs[i],b=cs[(i+1)%cs.length],ai=a[2]>=NEAR,bi=b[2]>=NEAR;
   if(ai)o.push(a);if(ai!==bi){const t=(NEAR-a[2])/(b[2]-a[2]);o.push([a[0]+t*(b[0]-a[0]),a[1]+t*(b[1]-a[1]),NEAR])}}return o}
 function poly(pts,fill,stroke,lw,dash){const cs=clip(pts.map(toC));if(cs.length<3)return;ctx.beginPath();cs.forEach((c,i)=>{const p=pr(c);i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])});ctx.closePath();
@@ -302,24 +306,52 @@ function callout(text,age,color){
 }
 
 /* ---------- 观察模式 ---------- */
-let cur=null,cmp=null,custom=null;
+let cur=null,cmps=[],ghost=null,custom=null;
 function pickPitches(){
   const s=source();
-  if(custom){cur=custom;cmp=null;return s}
-  typeIdx=Math.min(typeIdx,s.types.length-1);
-  cur=mk(s.types[typeIdx].t,s.types[typeIdx].P);
-  cmp=cmpIdx>=0&&s.types[cmpIdx]?mk(s.types[cmpIdx].t,s.types[cmpIdx].P):null;
+  if(custom){cur=custom;cmps=[]}
+  else{
+    typeIdx=Math.min(typeIdx,s.types.length-1);
+    cur=mk(s.types[typeIdx].t,s.types[typeIdx].P);
+    cmps=cmpIdx===-2?s.types.map((b,i)=>i===typeIdx?null:mk(b.t,b.P)).filter(Boolean):cmpIdx>=0&&s.types[cmpIdx]?[mk(s.types[cmpIdx].t,s.types[cmpIdx].P)]:[];
+  }
+  const ff=s.types.find(b=>T[b.t].code==='FF');
+  ghost=$('b-ghost').checked&&ff&&T[cur.t].code!=='FF'&&!cmps.some(c=>T[c.t].code==='FF')?mk(ff.t,ff.P):null;
   return s;
+}
+function obsBalls(tv){
+  const col=T[cur.t].col;
+  if(ghost&&tv<=ghost.Tend)ball(ghost.at(tv),'#8a8984',0.4,'FF 基准');
+  cmps.forEach(c=>{const c2=T[c.t].col;trail(c,tv,c2);if(tv<=c.Tend)ball(c.at(tv),c2,0.85,T[c.t].code)});
+  trail(cur,tv,col);if(tv<=cur.Tend)ball(cur.at(tv),col,1,(cmps.length||ghost)?T[cur.t].code:null);
+}
+function pip(tv){
+  if(mode!=='obs'||!$('b-zoom').checked)return;
+  const w=Math.round(W*0.32),h=Math.round(w*0.72),left=role==='bat'?bat==='R':bat!=='R',x=left?12:W-w-12,y=H-h-12,main=cam;
+  const tt=Math.min(tv,cur.T-15),set=[cur].concat(ghost?[ghost]:[],cmps).filter(p=>tt<=p.Tend),pts=set.map(p=>p.at(tt));
+  const ctr=pts.reduce((a,q)=>add(a,mul(q,1/pts.length)),[0,0,0]);
+  setCam(ctr,null,{E:main.E,cx:0,cy:0,F:1});
+  let off=0;pts.forEach(q=>{const c=toC(q);if(c[2]>NEAR){const r=pr(c);off=Math.max(off,Math.abs(r[0])/w,Math.abs(r[1])/h)}});
+  const F=clamp(off>0?0.36/off:main.F*5,main.F*1.5,main.F*14);
+  ctx.save();ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();
+  setCam(ctr,null,{E:main.E,cx:x+w/2,cy:y+h/2,F});
+  field();pitcher(cur.rel,tv,0);if(role==='catch')batterFig(null);zone();
+  const tr=$('b-trail').checked;$('b-trail').checked=false;obsBalls(tt);$('b-trail').checked=tr;
+  ctx.restore();cam=main;
+  ctx.lineWidth=1.5;ctx.strokeStyle=C.hudt;ctx.globalAlpha=0.5;ctx.strokeRect(x+.5,y+.5,w-1,h-1);ctx.globalAlpha=1;
+  const lines=[`放大 ×${(F/main.F).toFixed(1)} · 跟随球`];
+  if(ghost){const brk=p=>{const t=p.T/1000;return[.5*p.P[5]*t*t,.5*p.P[7]*t*t]},bc=brk(cur),bg=brk(ghost),dx=(bc[0]-bg[0])*12,dz=(bc[1]-bg[1])*12;
+    lines.push(`同样出手方向下，比 FF ${dz<0?'多坠':'少坠'} ${Math.abs(dz).toFixed(0)} in、横向偏${dx>0?'一垒侧':'三垒侧'} ${Math.abs(dx).toFixed(0)} in`)}
+  ctx.font='11px '+FONT;const tw=Math.max(...lines.map(l=>ctx.measureText(l).width))+12;
+  ctx.fillStyle=C.hud;ctx.fillRect(x,y,tw,lines.length*15+5);ctx.fillStyle=C.hudt;ctx.textAlign='left';lines.forEach((l,i)=>ctx.fillText(l,x+6,y+14+i*15));
 }
 function autoMitt(p,ms){const f=p.at(p.Tc),k=sstep((ms-(p.T-230))/200);return lerp(REST,[f[0],YC,f[2]],k)}
 function drawObs(){
   if(!ctx||!cur)return;
-  const col=T[cur.t].col,list=[[cur,col]],pos=cur.at(tau);if(cmp)list.push([cmp,T[cmp.t].col]);
+  const col=T[cur.t].col,list=[[cur,col]].concat(cmps.map(c=>[c,T[c.t].col])),pos=cur.at(tau);if(ghost)list.push([ghost,'#8a8984']);
   setCam(gaze(cur,pos),batterLoad(tau));field();pitcher(cur.rel,tau,0);
-  if(role==='catch')batterFig(null);zone();
-  if(cmp){const c2=T[cmp.t].col;trail(cmp,tau,c2);if(tau<=cmp.Tend)ball(cmp.at(tau),c2,0.8,T[cmp.t].code)}
-  trail(cur,tau,col);if(tau<=cur.Tend)ball(pos,col,1,cmp?T[cur.t].code:null);
-  mitt(autoMitt(cur,tau),tau>=cur.Tc);firstPerson();
+  if(role==='catch')batterFig(null);zone();obsBalls(tau);
+  mitt(autoMitt(cur,tau),tau>=cur.Tc);firstPerson();pip(tau);
   const left=cur.T-tau,dist=Math.max(0,pos[1]-YP),mph=Math.hypot(...cur.vel(tau))/1.4667;
   hud([`出手后 ${Math.round(tau)} ms`,left>=0?`距本垒 ${Math.round(left)} ms · ${dist.toFixed(1)} ft`:`已过本垒 ${Math.round(-left)} ms`,`瞬时球速 ${mph.toFixed(1)} mph`]);
   minimap(list,tau,true);
@@ -334,11 +366,11 @@ function ticks(){
 }
 function setupObs(){
   const s=pickPitches();
-  const mx=Math.ceil(Math.max(cur.Tend,cmp?cmp.Tend:0));$('b-t').max=mx;tau=Math.min(tau,mx);$('b-t').value=tau;
+  const mx=Math.ceil(Math.max(cur.Tend,...cmps.map(c=>c.Tend)));$('b-t').max=mx;tau=Math.min(tau,mx);$('b-t').value=tau;
   if(!custom){
     $('b-types').innerHTML=s.types.map((b,i)=>`<button class="chip${i===typeIdx?' on':''}" data-bt="${i}"><span class="sw" style="background:${T[b.t].col}"></span>${T[b.t].zh} ${T[b.t].code} <span class="n">${b.u.toFixed(0)}%</span></button>`).join('');
     $('b-types').querySelectorAll('[data-bt]').forEach(b=>b.onclick=()=>{typeIdx=+b.dataset.bt;if(cmpIdx===typeIdx)cmpIdx=-1;setupObs()});
-    $('b-cmp').innerHTML='<option value="-1">无</option>'+s.types.map((b,i)=>i===typeIdx?'':`<option value="${i}">${T[b.t].zh} ${T[b.t].code}</option>`).join('');
+    $('b-cmp').innerHTML='<option value="-1">无</option><option value="-2">全部球种</option>'+s.types.map((b,i)=>i===typeIdx?'':`<option value="${i}">${T[b.t].zh} ${T[b.t].code}</option>`).join('');
     $('b-cmp').value=cmpIdx;
   }else{
     $('b-types').innerHTML=`<span class="lb">正在查看实战中的那一球（${T[custom.t].zh}）</span> <button class="chip" id="b-back">返回球种列表</button>`;
@@ -429,7 +461,7 @@ function afterPitch(){
     $('b-res').innerHTML=`计数 <b>${PA.b}-${PA.s}</b>（坏球-好球）<ol>${PA.log.map(l=>`<li>${l}</li>`).join('')}</ol>`;
     timer=setTimeout(()=>{if(mode==='play'&&PA&&!PA.over)schedulePitch()},700);
   }
-  $('b-res').querySelectorAll('[data-rv]').forEach(a=>a.onclick=e=>{e.preventDefault();custom=PA.pitches[+a.dataset.rv];tau=0;setMode('obs')});
+  $('b-res').querySelectorAll('[data-rv]').forEach(a=>a.onclick=e=>{e.preventDefault();review(PA.pitches[+a.dataset.rv])});
   statLine();drawPlay(p.T+2400,performance.now());
 }
 function statLine(){
@@ -488,26 +520,27 @@ function seasons(){
 function syncSliders(){const v=VIEW[role];$('b-eye').value=v.eye;$('b-eyeo').textContent=v.eye.toFixed(1)+' ft';$('b-fov').value=v.fov;$('b-fovo').textContent=v.fov+'°'}
 function setMode(m){
   mode=m;stop();stopPlay();PA=null;
-  document.querySelectorAll('[data-bm]').forEach(b=>b.classList.toggle('on',b.dataset.bm===mode));
-  document.querySelectorAll('[data-br]').forEach(b=>b.classList.toggle('on',b.dataset.br===role));
+  ROOT.querySelectorAll('[data-bm]').forEach(b=>b.classList.toggle('on',b.dataset.bm===mode));
+  ROOT.querySelectorAll('[data-br]').forEach(b=>b.classList.toggle('on',b.dataset.br===role));
   $('b-obsrow').style.display=mode==='obs'?'flex':'none';$('b-obsctl').style.display=mode==='obs'?'block':'none';
   $('b-playctl').style.display=mode==='play'?'block':'none';$('b-speedrow').style.display=mode==='play'?'inline':'none';
   $('b-trail').checked=mode==='obs';$('b-track').parentElement.style.display=role==='bat'?'':'none';
   $('b-keys').innerHTML=role==='bat'?'<span class="kbd">Enter</span> 开始打席 · <span class="kbd">空格</span> 或点击画面挥棒':'<span class="kbd">Enter</span> 开始打席 · 移动鼠标摆手套接球';
   syncSliders();statLine();
-  if(mode==='obs'){$('b-res').innerHTML='拖动时间轴，或按 <span class="kbd">←</span><span class="kbd">→</span> 每次走 5 ms（Shift 走 1 ms），<span class="kbd">空格</span> 播放/暂停。'+(role==='bat'?'勾选“头部跟踪”可以模拟打者转头盯球。':'捕手视角下手套会自动迎向来球。');setupObs()}
+  if(mode==='obs'){$('b-res').innerHTML='拖动时间轴，或按 <span class="kbd">←</span><span class="kbd">→</span> 每次走 5 ms（Shift 走 1 ms），<span class="kbd">空格</span> 播放/暂停。<br>看不出变化时：<b>放大镜</b>窗口始终对准球、放大 5 倍；半透明的<b>四缝线基准</b>球与当前球同时出手，两者分开的过程就是这个球种相对速球的“变化”；叠加对比选“全部球种”可同时比较所有球路。'+(role==='bat'?'勾选“头部跟踪”可以模拟打者转头盯球。':'捕手视角下手套会自动迎向来球。');setupObs()}
   else{$('b-go').textContent='开始打席';$('b-res').innerHTML=role==='bat'?'一个打席为一轮：3 好球三振、4 坏球保送，打进场内就结束。球种和落点都从所选投手的真实投球里随机抽取。':'一个打席为一轮，打者由电脑控制。你是捕手：移动鼠标把手套放到球要来的位置，统计接住率。';idlePlay()}
 }
 function refresh(){srcInfo();setMode(mode)}
-document.querySelectorAll('[data-br]').forEach(b=>b.onclick=()=>{role=b.dataset.br;refresh()});
-document.querySelectorAll('[data-bm]').forEach(b=>b.onclick=()=>setMode(b.dataset.bm));
-document.querySelectorAll('[data-bb]').forEach(b=>b.onclick=()=>{bat=b.dataset.bb;document.querySelectorAll('[data-bb]').forEach(x=>x.classList.toggle('on',x===b));redraw()});
-document.querySelectorAll('[data-bs]').forEach(b=>b.onclick=()=>{speed=+b.dataset.bs;document.querySelectorAll('[data-bs]').forEach(x=>x.classList.toggle('on',x===b))});
+ROOT.querySelectorAll('[data-br]').forEach(b=>b.onclick=()=>{role=b.dataset.br;refresh()});
+ROOT.querySelectorAll('[data-bm]').forEach(b=>b.onclick=()=>setMode(b.dataset.bm));
+ROOT.querySelectorAll('[data-bb]').forEach(b=>b.onclick=()=>{bat=b.dataset.bb;ROOT.querySelectorAll('[data-bb]').forEach(x=>x.classList.toggle('on',x===b));redraw()});
+ROOT.querySelectorAll('[data-bs]').forEach(b=>b.onclick=()=>{speed=+b.dataset.bs;ROOT.querySelectorAll('[data-bs]').forEach(x=>x.classList.toggle('on',x===b))});
 $('b-src').onchange=e=>{src=e.target.value;custom=null;typeIdx=0;cmpIdx=-1;refresh()};
 $('b-cmp').onchange=e=>{cmpIdx=+e.target.value;setupObs()};
 $('b-t').oninput=e=>{stop();tau=+e.target.value;drawObs()};
 $('b-p1').onclick=()=>playObs(1);$('b-p4').onclick=()=>playObs(0.25);$('b-rs').onclick=()=>{stop();tau=0;$('b-t').value=0;drawObs()};
-['b-zone','b-trail','b-track','b-map','b-fp'].forEach(id=>$(id).onchange=redraw);
+['b-zone','b-trail','b-track','b-map','b-fp','b-zoom'].forEach(id=>$(id).onchange=redraw);
+$('b-ghost').onchange=()=>{if(mode==='obs')setupObs()};
 $('b-eye').oninput=e=>{VIEW[role].eye=+e.target.value;$('b-eyeo').textContent=VIEW[role].eye.toFixed(1)+' ft';redraw()};
 $('b-fov').oninput=e=>{VIEW[role].fov=+e.target.value;$('b-fovo').textContent=VIEW[role].fov+'°';redraw()};
 $('b-go').onclick=()=>{audio();startPA()};
@@ -528,6 +561,17 @@ document.addEventListener('keydown',e=>{
 });
 window.addEventListener('resize',()=>{if(visible)resize()});
 $('b-note').innerHTML='轨迹按 Statcast 的 9 参数匀加速模型计算（含空气阻力造成的减速），出手点、伸展距离和飞行时间来自真实数据；“联盟典型”为该赛季右投各球种参数的中位数。打者视点在打击区内（默认眼高 4.1 ft，视线略向上对准出手点），捕手视点在本垒后方约 3.5 ft 的蹲姿位置（默认眼高 3.0 ft），两者的眼高和视野可分别调整。挥棒判定：以“开始挥棒 + 150 ms”与球到达本垒前缘的时间差为时机误差，球偏离好球带每 1 ft 额外计 45 ms；误差 ≤22 ms 打进场内（越小越可能是长打），22–40 ms 为界外，更大为空挥。电脑打者的挥棒概率与击球结果按好球带内外的经验比例随机生成。决策点 175 ms、挥棒 150 ms 为常见研究估计；好球带取 1.6–3.4 ft。球场按标准尺寸建模；投手与打者均为不对应任何真实球员的示意人形，动作为通用关键帧动画。音效为浏览器实时合成。';
-fillSources();seasons();srcInfo();setMode('play');
+function review(p){
+  if(FIXED!=='play'){custom=p;tau=0;setMode('obs');return}
+  window.dispatchEvent(new CustomEvent('pte-review',{detail:{t:p.t,P:p.P,role,bat,si,src}}));
+}
+if(FIXED==='obs')window.addEventListener('pte-review',e=>{
+  const d=e.detail;si=d.si;src=d.src;role=d.role;bat=d.bat;
+  ROOT.querySelectorAll('[data-bb]').forEach(x=>x.classList.toggle('on',x.dataset.bb===bat));
+  fillSources();seasons();srcInfo();custom=mk(d.t,d.P);tau=0;setMode('obs');
+  const tab=document.querySelector('.tab[data-tab=obs]');if(tab)tab.click();
+});
+if(FIXED){$('b-moderow').style.display='none'}
+fillSources();seasons();srcInfo();setMode(FIXED||'play');
 return{show:v=>{visible=v;if(v){seasons();resize()}else{stop();stopPlay()}}};
 </script>

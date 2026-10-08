@@ -7,7 +7,7 @@
 第一个赛季为页面默认赛季（自动模式下按年份从新到旧）。页面模板位于 src/：
   src/model.html     球种模型（位移雷达、轨迹、透视）
   src/realdata.html  真实数据（Statcast 极坐标散点）
-  src/batting.html   打击视角（打者/捕手第一人称、打席模拟）
+  src/batting.html   第一视角模块（打者/捕手），构建时实例化为「第一视角观察」与「打席模拟」两个标签页
 
 换算约定：
   IVB = pfx_z*12；HB 以手臂侧为正：右投 = -pfx_x*12，左投 = +pfx_x*12。
@@ -150,16 +150,18 @@ def process(season, src, n_sample, rng):
         bat_types.sort(key=lambda b: -b["n"])
         bs = dt.sample(min(BAT_SAMPLE, len(dt)), random_state=int(rng.integers(1e9)))
         bat_samp = [[code2i[r.pitch_type]] + traj_vec(r._asdict()) for r in bs.itertuples()]
-        top = "、".join(f"{TYPES[m['t']][1].split(' ')[0]} {m['u']:.0f}%" for m in mix[:3])
-        fb = [m for m in mix if TYPES[m["t"]][0] in FASTBALLS]
+        ff = [m for m in mix if TYPES[m["t"]][0] == "FF"]
+        fb = ff or [m for m in mix if TYPES[m["t"]][0] in FASTBALLS]
         fbm = max(fb, key=lambda m: m["n"]) if fb else None
-        auto = f"主要球路：{top}" + (f"；{TYPES[fbm['t']][1]}中位球速 {fbm['v']:.1f} mph" if fbm else "")
+        med = lambda c: float(d[c].median()) if c in d and d[c].notna().any() else None
+        metrics = {"fb": fbm, "arm": med("arm_angle"), "ext": med("release_extension"), "relz": med("release_pos_z"),
+                   "use": {TYPES[m["t"]][0]: m for m in mix}}
         ng = int(len(games))
         pitchers.append({
             "id": pid, "name": display_name(pid, d.player_name.iloc[0]), "hand": hand,
             "role": "先发" if starts >= ng / 2 else "后援", "games": ng, "starts": starts,
             "n": int(len(d)), "teams": teams, "mix": mix, "dropped": dropped,
-            "note": auto + ("<br>" + SIGNATURE[pid] if pid in SIGNATURE else ""),
+            "sig": SIGNATURE.get(pid, ""), "_m": metrics,
             "bat": {"types": bat_types, "samp": bat_samp},
         })
         samp = d.sample(min(n_sample, len(d)), random_state=int(rng.integers(1e9)))
@@ -185,6 +187,7 @@ def process(season, src, n_sample, rng):
                  for c, g in rd.groupby("pitch_type") if g.k.nunique() >= 2]
     typ_types.sort(key=lambda b: -b["n"])
     typical = {"types": typ_types, "np": int(rd.k.nunique())}   # 实战抽样在前端由右投投手的 samp 合并
+    add_styles(pitchers, season)
     # 卡片顺序：按球队缩写，再按球数
     order = sorted(range(len(pitchers)), key=lambda i: (pitchers[i]["teams"][-1], -pitchers[i]["n"]))
     remap = {old: new for new, old in enumerate(order)}
@@ -198,6 +201,62 @@ def process(season, src, n_sample, rng):
             print("   ", p["name"], p["teams"], "dropped:", p["dropped"])
     return {"season": season, "pitchers": pitchers, "rows": rows, "all": allstats,
             "nTotal": int(len(alld)), "typical": typical}
+
+
+def add_styles(pitchers, season):
+    """由数据生成投球风格关键词与一句事实性点评（阈值为经验设定，排名只在本页投手池内比较）。"""
+    N = len(pitchers)
+    fbv = sorted((p["_m"]["fb"]["v"] for p in pitchers if p["_m"]["fb"]), reverse=True)
+    ffi = sorted((p["_m"]["use"]["FF"]["ivb"] for p in pitchers if "FF" in p["_m"]["use"]), reverse=True)
+    exts = sorted((p["_m"]["ext"] for p in pitchers if p["_m"]["ext"]), reverse=True)
+    for p in pitchers:
+        m, u = p["_m"], p["_m"]["use"]
+        tags = []  # (显著度, 关键词)
+        fb = m["fb"]
+        if fb:
+            v = fb["v"]
+            if v >= 97.5: tags.append((3 + (v - 97.5), "火球型"))
+            elif v <= 92.0: tags.append((2, "速度不快、靠控球与变化"))
+        if "FF" in u:
+            ff = u["FF"]
+            if ff["ivb"] >= 18.5: tags.append((2.5 + (ff["ivb"] - 18.5) / 2, "高 IVB「上飘」四缝线"))
+            elif ff["ivb"] <= 13.5 and ff["u"] >= 20: tags.append((1.5, "偏平的四缝线"))
+            if ff["s"] >= 2550: tags.append((1.4, "高转速四缝线"))
+        a = m["arm"]
+        if a is not None:
+            if a < 20: tags.append((3, "侧投"))
+            elif a < 32: tags.append((2.2, "低肩出手"))
+            elif a >= 56: tags.append((2, "高压出手"))
+        e = m["ext"]
+        if e:
+            if e >= 7.2: tags.append((2.3, "伸展极长"))
+            elif e <= 5.9: tags.append((1.5, "伸展偏短"))
+        g = lambda c: u.get(c, {"u": 0, "ivb": 0, "hb": 0})
+        if g("SI")["u"] >= 25 and g("SI")["u"] > g("FF")["u"]: tags.append((2.4, "伸卡为主、滚地球型"))
+        if g("FC")["u"] >= 30: tags.append((2.4, "卡特为主"))
+        if g("ST")["u"] >= 15 and g("ST")["hb"] <= -14: tags.append((2.2, "大横移横扫"))
+        if g("SL")["u"] >= 25: tags.append((2.0, "滑球是主要武器"))
+        if g("CU")["u"] >= 12 and g("CU")["ivb"] <= -14: tags.append((2.1, "大落差曲球"))
+        if g("KC")["u"] >= 15: tags.append((1.8, "指节曲球是主要变化球"))
+        if g("CH")["u"] >= 20: tags.append((2.2, "变速球是招牌"))
+        if g("FS")["u"] >= 15: tags.append((2.3, "指叉是主武器"))
+        if g("FO")["u"] >= 15: tags.append((2.6, "叉指球（幽灵叉）"))
+        k = sum(1 for x in u.values() if x["u"] >= 4)
+        if k >= 6: tags.append((1.6, f"球路多样（{k} 种）"))
+        elif k <= 3: tags.append((1.6, f"球路精简（{k} 种）"))
+        tags = [t for _, t in sorted(tags, key=lambda x: -x[0])][:4] or ["均衡型"]
+        top = p["mix"][0]
+        parts = [f"最常用{TYPES[top['t']][1].split(' ')[0]}（{top['u']:.0f}%）"]
+        if fb:
+            parts.append(f"{TYPES[fb['t']][1]}中位 {fb['v']:.1f} mph（本页 {N} 人中第 {fbv.index(fb['v']) + 1}）")
+        if "FF" in u:
+            parts.append(f"四缝线 IVB {u['FF']['ivb']:+.1f} in（第 {ffi.index(u['FF']['ivb']) + 1}）")
+        if a is not None:
+            parts.append(f"手臂角度 {a:.0f}°")
+        if e:
+            parts.append(f"伸展 {e:.1f} ft（第 {exts.index(e) + 1}）")
+        p["style"] = {"tags": tags, "text": "，".join(parts) + "。"}
+        del p["_m"]
 
 
 rng = np.random.default_rng(2026)
@@ -226,6 +285,18 @@ bat = open(ROOT / "src" / "batting.html", encoding="utf-8").read()
 b_style = re.search(r"<style>(.*?)</style>", bat, re.S).group(1)
 b_body = re.search(r"<!--BODY-->(.*?)<!--/BODY-->", bat, re.S).group(1)
 b_script = re.search(r"<script>(.*?)</script>", bat, re.S).group(1)
+
+
+def bat_instance(sec, mode, pfx):
+    """打击模块实例化两次（第一视角观察 / 打席模拟）：元素 id 加前缀，固定模式。"""
+    body = b_body.replace('id="b-', f'id="{pfx}-')
+    js = (b_script.replace("'b-", f"'{pfx}-").replace('"b-', f'"{pfx}-')
+          .replace("/*__SEC__*/'tab-bat'", f"'{sec}'").replace("/*__MODE__*/null", f"'{mode}'"))
+    return body, js
+
+
+o_body, o_js = bat_instance("tab-obs", "obs", "o")
+p_body, p_js = bat_instance("tab-play", "play", "p")
 tab_label = f"真实数据 · {'/'.join(s for s, _ in SEASONS)} MLB 投手"
 
 html = f"""<!doctype html>
@@ -241,23 +312,26 @@ html = f"""<!doctype html>
 <div class="tabs" role="tablist">
   <button class="tab on" data-tab="model" role="tab">球种模型</button>
   <button class="tab" data-tab="real" role="tab">{tab_label}</button>
-  <button class="tab" data-tab="bat" role="tab">打击视角</button>
+  <button class="tab" data-tab="obs" role="tab">第一视角观察</button>
+  <button class="tab" data-tab="play" role="tab">打席模拟</button>
 </div>
 <section id="tab-model">{m_body}</section>
 <section id="tab-real" hidden>{r_body}</section>
-<section id="tab-bat" hidden>{b_body}</section>
+<section id="tab-obs" hidden>{o_body}</section>
+<section id="tab-play" hidden>{p_body}</section>
 </main>
 <script>
 (()=>{{{m_script}}})();
 const REAL=(()=>{{{r_script}}})();
-const BAT=((D)=>{{{b_script}}})(REAL.data);
+const OBS=((D)=>{{{o_js}}})(REAL.data);
+const PLAY=((D)=>{{{p_js}}})(REAL.data);
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{{
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===b));
   document.getElementById('tab-model').hidden=b.dataset.tab!=='model';
   document.getElementById('tab-real').hidden=b.dataset.tab!=='real';
-  document.getElementById('tab-bat').hidden=b.dataset.tab!=='bat';
+  ['obs','play'].forEach(t=>document.getElementById('tab-'+t).hidden=b.dataset.tab!==t);
   if(b.dataset.tab==='real')REAL.draw();
-  BAT.show(b.dataset.tab==='bat');
+  OBS.show(b.dataset.tab==='obs');PLAY.show(b.dataset.tab==='play');
 }});
 </script>
 </body>
