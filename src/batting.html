@@ -38,7 +38,6 @@
   <span class="lb">球种</span><span id="b-types" style="display:flex;flex-wrap:wrap;gap:6px"></span>
   <span class="lb" style="margin-left:6px">叠加对比</span><select id="b-cmp"></select>
   <label class="lb"><input type="checkbox" id="b-ghost" checked> 四缝线基准</label>
-  <label class="lb"><input type="checkbox" id="b-zoom" checked> 放大镜</label>
 </div>
 <div class="opt">
   <label class="lb"><input type="checkbox" id="b-fp" checked> 第一人称遮挡</label>
@@ -325,38 +324,20 @@ function obsBalls(tv){
   cmps.forEach(c=>{const c2=T[c.t].col;trail(c,tv,c2);if(tv<=c.Tend)ball(c.at(tv),c2,0.85,T[c.t].code)});
   trail(cur,tv,col);if(tv<=cur.Tend)ball(cur.at(tv),col,1,(cmps.length||ghost)?T[cur.t].code:null);
 }
-function pip(tv){
-  if(mode!=='obs'||!$('b-zoom').checked)return;
-  const w=Math.round(W*0.32),h=Math.round(w*0.72),left=role==='bat'?bat==='R':bat!=='R',x=left?12:W-w-12,y=H-h-12,main=cam;
-  const tt=Math.min(tv,cur.T-15),set=[cur].concat(ghost?[ghost]:[],cmps).filter(p=>tt<=p.Tend),pts=set.map(p=>p.at(tt));
-  const ctr=pts.reduce((a,q)=>add(a,mul(q,1/pts.length)),[0,0,0]);
-  setCam(ctr,null,{E:main.E,cx:0,cy:0,F:1});
-  let off=0;pts.forEach(q=>{const c=toC(q);if(c[2]>NEAR){const r=pr(c);off=Math.max(off,Math.abs(r[0])/w,Math.abs(r[1])/h)}});
-  const F=clamp(off>0?0.36/off:main.F*5,main.F*1.5,main.F*14);
-  ctx.save();ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();
-  setCam(ctr,null,{E:main.E,cx:x+w/2,cy:y+h/2,F});
-  field();pitcher(cur.rel,tv,0);if(role==='catch')batterFig(null);zone();
-  const tr=$('b-trail').checked;$('b-trail').checked=false;obsBalls(tt);$('b-trail').checked=tr;
-  ctx.restore();cam=main;
-  ctx.lineWidth=1.5;ctx.strokeStyle=C.hudt;ctx.globalAlpha=0.5;ctx.strokeRect(x+.5,y+.5,w-1,h-1);ctx.globalAlpha=1;
-  const lines=[`放大 ×${(F/main.F).toFixed(1)} · 跟随球`];
-  if(ghost){const brk=p=>{const t=p.T/1000;return[.5*p.P[5]*t*t,.5*p.P[7]*t*t]},bc=brk(cur),bg=brk(ghost),dx=(bc[0]-bg[0])*12,dz=(bc[1]-bg[1])*12;
-    lines.push(`同样出手方向下，比 FF ${dz<0?'多坠':'少坠'} ${Math.abs(dz).toFixed(0)} in、横向偏${dx>0?'一垒侧':'三垒侧'} ${Math.abs(dx).toFixed(0)} in`)}
-  ctx.font='11px '+FONT;const tw=Math.max(...lines.map(l=>ctx.measureText(l).width))+12;
-  ctx.fillStyle=C.hud;ctx.fillRect(x,y,tw,lines.length*15+5);ctx.fillStyle=C.hudt;ctx.textAlign='left';lines.forEach((l,i)=>ctx.fillText(l,x+6,y+14+i*15));
-}
 function autoMitt(p,ms){const f=p.at(p.Tc),k=sstep((ms-(p.T-230))/200);return lerp(REST,[f[0],YC,f[2]],k)}
 function drawObs(){
   if(!ctx||!cur)return;
   const col=T[cur.t].col,list=[[cur,col]].concat(cmps.map(c=>[c,T[c.t].col])),pos=cur.at(tau);if(ghost)list.push([ghost,'#8a8984']);
   setCam(gaze(cur,pos),batterLoad(tau));field();pitcher(cur.rel,tau,0);
   if(role==='catch')batterFig(null);zone();obsBalls(tau);
-  mitt(autoMitt(cur,tau),tau>=cur.Tc);firstPerson();pip(tau);
+  mitt(autoMitt(cur,tau),tau>=cur.Tc);firstPerson();
   const left=cur.T-tau,dist=Math.max(0,pos[1]-YP),mph=Math.hypot(...cur.vel(tau))/1.4667;
   hud([`出手后 ${Math.round(tau)} ms`,left>=0?`距本垒 ${Math.round(left)} ms · ${dist.toFixed(1)} ft`:`已过本垒 ${Math.round(-left)} ms`,`瞬时球速 ${mph.toFixed(1)} mph`]);
   minimap(list,tau,true);
   const ph=left>DEC?'识别期：看出手点和旋转':left>SWING?'决策窗口：必须决定挥不挥':left>0?'挥棒中：已来不及调整':'球已过本垒';
-  $('b-read').innerHTML=`${T[cur.t].zh} ${T[cur.t].code} · 出手 ${cur.mph.toFixed(1)} mph · 飞行 ${Math.round(cur.T)} ms · <b style="font-weight:500">${ph}</b>`;
+  let brkTxt='';if(ghost){const brk=p=>{const t=p.T/1000;return[.5*p.P[5]*t*t,.5*p.P[7]*t*t]},bc=brk(cur),bg=brk(ghost),dx=(bc[0]-bg[0])*12,dz=(bc[1]-bg[1])*12;
+    brkTxt=`<br>同样出手方向下，比四缝线${dz<0?'多坠':'少坠'} ${Math.abs(dz).toFixed(0)} in、横向偏${dx>0?'一垒侧':'三垒侧'} ${Math.abs(dx).toFixed(0)} in`}
+  $('b-read').innerHTML=`${T[cur.t].zh} ${T[cur.t].code} · 出手 ${cur.mph.toFixed(1)} mph · 飞行 ${Math.round(cur.T)} ms · <b style="font-weight:500">${ph}</b>${brkTxt}`;
 }
 function ticks(){
   const mx=+$('b-t').max,pct=v=>clamp(v/mx*100,0,100);
@@ -527,7 +508,7 @@ function setMode(m){
   $('b-trail').checked=mode==='obs';$('b-track').parentElement.style.display=role==='bat'?'':'none';
   $('b-keys').innerHTML=role==='bat'?'<span class="kbd">Enter</span> 开始打席 · <span class="kbd">空格</span> 或点击画面挥棒':'<span class="kbd">Enter</span> 开始打席 · 移动鼠标摆手套接球';
   syncSliders();statLine();
-  if(mode==='obs'){$('b-res').innerHTML='拖动时间轴，或按 <span class="kbd">←</span><span class="kbd">→</span> 每次走 5 ms（Shift 走 1 ms），<span class="kbd">空格</span> 播放/暂停。<br>看不出变化时：<b>放大镜</b>窗口始终对准球、放大 5 倍；半透明的<b>四缝线基准</b>球与当前球同时出手，两者分开的过程就是这个球种相对速球的“变化”；叠加对比选“全部球种”可同时比较所有球路。'+(role==='bat'?'勾选“头部跟踪”可以模拟打者转头盯球。':'捕手视角下手套会自动迎向来球。');setupObs()}
+  if(mode==='obs'){$('b-res').innerHTML='拖动时间轴，或按 <span class="kbd">←</span><span class="kbd">→</span> 每次走 5 ms（Shift 走 1 ms），<span class="kbd">空格</span> 播放/暂停。<br>看不出变化时：半透明的<b>四缝线基准</b>球与当前球同时出手，两者分开的过程就是这个球种相对速球的“变化”；叠加对比选“全部球种”可同时比较所有球路。'+(role==='bat'?'勾选“头部跟踪”可以模拟打者转头盯球。':'捕手视角下手套会自动迎向来球。');setupObs()}
   else{$('b-go').textContent='开始打席';$('b-res').innerHTML=role==='bat'?'一个打席为一轮：3 好球三振、4 坏球保送，打进场内就结束。球种和落点都从所选投手的真实投球里随机抽取。':'一个打席为一轮，打者由电脑控制。你是捕手：移动鼠标把手套放到球要来的位置，统计接住率。';idlePlay()}
 }
 function refresh(){srcInfo();setMode(mode)}
@@ -539,7 +520,7 @@ $('b-src').onchange=e=>{src=e.target.value;custom=null;typeIdx=0;cmpIdx=-1;refre
 $('b-cmp').onchange=e=>{cmpIdx=+e.target.value;setupObs()};
 $('b-t').oninput=e=>{stop();tau=+e.target.value;drawObs()};
 $('b-p1').onclick=()=>playObs(1);$('b-p4').onclick=()=>playObs(0.25);$('b-rs').onclick=()=>{stop();tau=0;$('b-t').value=0;drawObs()};
-['b-zone','b-trail','b-track','b-map','b-fp','b-zoom'].forEach(id=>$(id).onchange=redraw);
+['b-zone','b-trail','b-track','b-map','b-fp'].forEach(id=>$(id).onchange=redraw);
 $('b-ghost').onchange=()=>{if(mode==='obs')setupObs()};
 $('b-eye').oninput=e=>{VIEW[role].eye=+e.target.value;$('b-eyeo').textContent=VIEW[role].eye.toFixed(1)+' ft';redraw()};
 $('b-fov').oninput=e=>{VIEW[role].fov=+e.target.value;$('b-fovo').textContent=VIEW[role].fov+'°';redraw()};
