@@ -203,6 +203,77 @@ def process(season, src, n_sample, rng):
             "nTotal": int(len(alld)), "typical": typical}
 
 
+ZH_SHORT = {"FF": "四缝线", "SI": "伸卡", "FC": "卡特", "SL": "滑球", "ST": "横扫", "SV": "横曲球", "CU": "曲球",
+            "KC": "指节曲球", "CH": "变速球", "FS": "指叉", "FO": "叉指球"}
+
+
+def evaluate(p, m, fbv):
+    """一两句点评：整体风格 + 主要武器/出手特点。数值均来自该投手本人各球种的中位数。"""
+    u, fb, a, e = m["use"], m["fb"], m["arm"], m["ext"]
+    g = lambda c: u.get(c)
+    fbc = TYPES[fb["t"]][0] if fb else None
+    top_fast = fbv.index(fb["v"]) < max(5, len(fbv) // 8) if fb else False
+    si, ff, fc = g("SI"), g("FF"), g("FC")
+    # 第一句：整体风格
+    if si and si["u"] >= 25 and si["u"] > (ff["u"] if ff else 0):
+        s1 = f"典型的滚地球投手：伸卡往手臂侧下沉（HB {si['hb']:+.0f} in），引诱打者打成滚地球"
+    elif fc and fc["u"] >= 30:
+        s1 = f"以卡特为核心：{fc['v']:.0f} mph 的卡特在尾端往手套侧切，专门让打者打在球棒细端、制造弱击球"
+    elif fb and fb["v"] >= 97.5 and ff and ff["ivb"] >= 17.5:
+        s1 = f"纯粹的力量型：{fb['v']:.0f} mph 的四缝线还带 {ff['ivb']:.0f} in 的「上飘」，专攻好球带上缘"
+    elif fb and (fb["v"] >= 97.5 or top_fast):
+        s1 = f"靠速度压制，{ZH_SHORT[fbc]}均速 {fb['v']:.1f} mph"
+    elif fb and fb["v"] <= 92.5:
+        s1 = "球速不占优势，靠球路组合、位移和落点吃饭"
+    elif ff and ff["ivb"] >= 18:
+        s1 = f"四缝线 IVB 达 {ff['ivb']:.0f} in，比同速度的速球更「浮」，容易让打者挥到球的下方"
+    else:
+        k = sum(1 for x in u.values() if x["u"] >= 4)
+        others = sorted((x for c, x in u.items() if c not in FASTBALLS), key=lambda x: -x["u"])
+        if k >= 6:
+            s1 = f"球种多达 {k} 种、配球多变，让打者很难押中球种"
+        elif ff and ff["u"] >= 50:
+            s1 = f"速球主导：四缝线占 {ff['u']:.0f}%，敢在好球带里直接对决"
+        elif k <= 2:
+            s1 = "只靠两种球的极简组合，胜在每一种都足够有威胁"
+        elif ff and ff["ivb"] <= 13.5:
+            s1 = f"四缝线偏平（IVB {ff['ivb']:.0f} in），更多依赖位移和出手角度"
+        elif len(others) >= 2:
+            s1 = f"以{ZH_SHORT.get(fbc, '速球')}为基础，{ZH_SHORT[TYPES[others[1]['t']][0]]}（{others[1]['u']:.0f}%）也是常用的辅助球种"
+        else:
+            s1 = f"以{ZH_SHORT.get(fbc, '速球')}为基础的均衡型"
+    # 第二句：主要武器（使用率最高的非速球），用相对本人速球的差值描述
+    base = ff or fb
+    off = [x for c, x in u.items() if c not in FASTBALLS]
+    s2 = ""
+    if off and base:
+        w = max(off, key=lambda x: x["u"])
+        c = TYPES[w["t"]][0]
+        dv, dz, dx = base["v"] - w["v"], base["ivb"] - w["ivb"], w["hb"] - base["hb"]
+        nm = ZH_SHORT[c]
+        if c in ("ST", "SV") or (c == "SL" and dx <= -12):
+            s2 = f"主要武器是{nm}（{w['u']:.0f}%），比速球往手套侧多偏 {abs(dx):.0f} in，用横向位移把打者的视线拉开"
+        elif c in ("CU", "KC"):
+            s2 = f"主要武器是{nm}（{w['u']:.0f}%），比速球慢 {dv:.0f} mph、多坠 {dz:.0f} in，与速球形成上下和快慢的双重反差"
+        elif c in ("CH", "FS", "FO"):
+            s2 = f"主要武器是{nm}（{w['u']:.0f}%），出手像速球，但慢 {dv:.0f} mph、多坠 {dz:.0f} in，靠速差和下坠骗挥棒"
+        elif c == "SL":
+            bits = ([f"比速球慢 {dv:.0f} mph"] if dv >= 2 else []) + ([f"往手套侧多偏 {abs(dx):.0f} in"] if abs(dx) >= 3 else [])
+            s2 = f"主要武器是{nm}（{w['u']:.0f}%），" + ("、".join(bits) + "，变化晚且紧" if bits else "轨迹与速球很接近，变化晚而短促")
+    # 出手特点（补充半句）
+    tail = ""
+    if a is not None and a < 20:
+        tail = "接近侧投的出手角度让来球更「平」、更横，对同侧打者通常尤其难受"
+    elif a is not None and a < 30:
+        tail = "低肩出手让速球偏平、横向跑动更明显"
+    elif a is not None and a >= 55:
+        tail = "高压出手让速球与下坠球形成明显的上下对比"
+    elif e and e >= 7.2:
+        tail = f"{e:.1f} ft 的超长伸展让出手点更靠近本垒，体感球速比测速更快"
+    s2 = "；".join(x for x in (s2, tail) if x)
+    return "。".join(x for x in (s1, s2) if x) + "。"
+
+
 def add_styles(pitchers, season):
     """由数据生成投球风格关键词与一句事实性点评（阈值为经验设定，排名只在本页投手池内比较）。"""
     N = len(pitchers)
@@ -255,7 +326,7 @@ def add_styles(pitchers, season):
             parts.append(f"手臂角度 {a:.0f}°")
         if e:
             parts.append(f"伸展 {e:.1f} ft（第 {exts.index(e) + 1}）")
-        p["style"] = {"tags": tags, "text": "，".join(parts) + "。"}
+        p["style"] = {"tags": tags, "text": "，".join(parts) + "。", "eval": evaluate(p, m, fbv)}
         del p["_m"]
 
 

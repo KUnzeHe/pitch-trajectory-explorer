@@ -101,7 +101,7 @@ function prof(){
   if(who<0){const g=group(),n=g.reduce((a,i)=>a+PS[i].n,0);
     P.innerHTML=`<div class="prof"><span class="big">${team?teamLine({teams:[team]}):'全部投手'} · ${S.season} 常规赛</span><br><span class="sub2">${g.length} 名投手，合计 ${n.toLocaleString()} 球；左投已镜像为右投方向。散点为每人随机抽样，${team?'表格中位数来自抽样':'表格与大圆点用全季数据'}。点卡片或图中的点查看单个投手。</span></div>`;return}
   const p=PS[who];
-  P.innerHTML=`<div class="prof"><span class="big">${p.name}</span>　${teamLine(p)}<br><span class="sub2">${p.hand==='R'?'右投':'左投'} · ${p.role} · ${S.season} 常规赛 ${p.games} 场（先发 ${p.starts}）· ${p.n.toLocaleString()} 球</span><div style="margin:6px 0 2px;display:flex;flex-wrap:wrap;gap:6px">${p.style.tags.map(t=>`<span class="stag">${t}</span>`).join('')}</div><span class="sub2">${p.style.text}</span>${p.sig?`<br>${p.sig}`:''}</div>`;
+  P.innerHTML=`<div class="prof"><span class="big">${p.name}</span>　${teamLine(p)}<br><span class="sub2">${p.hand==='R'?'右投':'左投'} · ${p.role} · ${S.season} 常规赛 ${p.games} 场（先发 ${p.starts}）· ${p.n.toLocaleString()} 球</span><div style="margin:6px 0 2px;display:flex;flex-wrap:wrap;gap:6px">${p.style.tags.map(t=>`<span class="stag">${t}</span>`).join('')}</div><div style="margin:2px 0 4px">${p.style.eval}</div><span class="sub2">${p.style.text}</span>${p.sig?`<br>${p.sig}`:''}</div>`;
 }
 function chips(){
   const C=$('r-chips');C.innerHTML='';
